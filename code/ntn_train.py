@@ -71,10 +71,17 @@ def run_training():
     # shape of word embeds: 67447, 100; number of entities: 38696
     (init_word_embeds, entity_to_wordvec) = ntn_input.load_init_embeds(params.data_path)
 
-    num_iters = params.num_iter
+    num_epoches = params.epoches
     batch_size = params.batch_size
     corrupt_size = params.corrupt_size
     slice_size = params.slice_size
+
+    n_iterations_per_epoch = len(indexed_training_data) // batch_size
+    n_iterations_validation = len(indexed_dev_data) // batch_size
+    n_iterations_evaluation = len(indexed_test_data) // batch_size
+    print("# of iteration/epoch", n_iterations_per_epoch)
+    print("# of iteration/validation", n_iterations_validation)
+    print("# of iteration/evaluation", n_iterations_evaluation)
 
     with tf.Graph().as_default():
         print("Starting to build graph " + str(datetime.datetime.now()))
@@ -102,35 +109,36 @@ def run_training():
         saver = tf.train.Saver(tf.trainable_variables())
 
         # training
-        for i in range(1, num_iters):
+        for i in range(1, num_epoches):
             print("Starting iter " + str(i) + " " + str(datetime.datetime.now()))
-            data_train_batch = get_train_batch(batch_size, indexed_training_data, num_entities, corrupt_size)
-            relation_train_batches = split_train_batch(data_train_batch, num_relations)
-            data_dev_batch = get_test_batch(batch_size, indexed_dev_data)
-            relation_dev_batches = split_test_batch(data_dev_batch, num_relations)
-
-            feed_dict_training = fill_feed_dict(relation_train_batches, params.train_both, batch_placeholders,
-                                       label_placeholders, corrupt_placeholder)
-            feed_dict_dev = fill_feed_dict(relation_dev_batches, params.train_both, batch_placeholders,
-                                               label_placeholders, corrupt_placeholder)
-
-            _, train_loss_value, train_eval_value = sess.run([training, train_loss, ntn.eval(train_inference)], feed_dict=feed_dict_training)
-            dev_eval_value = sess.run(ntn.eval(test_inference), feed_dict=feed_dict_dev)
-
-            print("Iter {}, Training data loss = {}".format(i, train_eval_value))
-            print("Iter {}, Dev data loss = {}".format(i, dev_eval_value))
-
+            for j in range(1, n_iterations_per_epoch + 1):
+                data_train_batch = get_train_batch(batch_size, indexed_training_data, num_entities, corrupt_size)
+                relation_train_batches = split_train_batch(data_train_batch, num_relations)
+                feed_dict_training = fill_feed_dict(relation_train_batches, params.train_both, batch_placeholders,
+                                           label_placeholders, corrupt_placeholder)
+                _, train_loss_value, train_eval_value = sess.run([training, train_loss, ntn.eval(train_inference)], feed_dict=feed_dict_training)
+                print("Iter {}, batch {}, Training data loss = {}".format(i, j, train_eval_value))
             if i % params.save_per_iter == 0:
                 saver.save(sess, params.output_path + "/" + params.data_name + str(i) + '.sess')
                 print("Model saved at iter {}".format(i))
 
-        # test
-        data_test_batch = get_test_batch(batch_size, indexed_test_data)
-        relation_test_batches = split_test_batch(data_test_batch, num_relations)
-        feed_dict_testing = fill_feed_dict(relation_test_batches, params.train_both, batch_placeholders,
-                                               label_placeholders, corrupt_placeholder)
-        test_eval_value = sess.run(ntn.eval(test_inference), feed_dict=feed_dict_testing)
-        print("Final Test Accuracy = {}".format(test_eval_value))
+            # At the end of each epoch, test the dev data
+            for j in range(1, n_iterations_validation + 1):
+                data_dev_batch = get_test_batch(batch_size, indexed_dev_data)
+                relation_dev_batches = split_test_batch(data_dev_batch, num_relations)
+                feed_dict_dev = fill_feed_dict(relation_dev_batches, params.train_both, batch_placeholders,
+                                           label_placeholders, corrupt_placeholder)
+                dev_eval_value = sess.run(ntn.eval(test_inference), feed_dict=feed_dict_dev)
+                print("Iter {}, batch {}, Dev data loss = {}".format(i, j, dev_eval_value))
+
+        # testing
+        for j in range(1, n_iterations_evaluation):
+            data_test_batch = get_test_batch(batch_size, indexed_test_data)
+            relation_test_batches = split_test_batch(data_test_batch, num_relations)
+            feed_dict_testing = fill_feed_dict(relation_test_batches, params.train_both, batch_placeholders,
+                                                   label_placeholders, corrupt_placeholder)
+            test_eval_value = sess.run(ntn.eval(test_inference), feed_dict=feed_dict_testing)
+            print("Final Test Accuracy = {}".format(test_eval_value))
 
 def main(argv):
     run_training()
